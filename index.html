@@ -43,7 +43,7 @@ function updateMicLanguage() {
 updateMicLanguage();
 function knWords(q){return q.toLowerCase().replace(/ಉತ್ತರ ಕರ್ನಾಟಕ|ನಾರ್ತ್ ಇಂಡಿಯನ್|ಉತ್ತರ ಭಾರತೀಯ|ಉತ್ತರ ಭಾರತದ|ಉತ್ತರ ಇಂಡಿಯನ್/g,'north indian').replace(/ದಕ್ಷಿಣ ಭಾರತೀಯ|ದಕ್ಷಿಣ ಭಾರತದ|ದಕ್ಷಿಣ ಇಂಡಿಯನ್|ಸೌತ್ ಇಂಡಿಯನ್/g,'south indian').replace(/ಪ್ರೀಮಿಯಂ|ದುಬಾರಿ|ಫೈನ್ ಡೈನಿಂಗ್|ಐಷಾರಾಮಿ/g,'premium').replace(/ಸಾಮಾನ್ಯ|ರೆಗ್ಯುಲರ್|ಕಡಿಮೆ ಬೆಲೆ|ಬಜೆಟ್/g,'regular').replace(/ಹೋಟೆಲ್|ರೆಸ್ಟೋರೆಂಟ್|ಊಟ|ತಿಂಡಿ|ಭೋಜನ|ಒಳ್ಳೆ|ಒಳ್ಳೆಯ/g,' restaurant ').replace(/ಬಾರ್/g,' bar ').replace(/ಬೇಡ/g,' beda ').replace(/\b(bar\s+beda|beda\s+bar)\b/g,'regular restaurant').replace(/\b(oota|tindi)\b/g,' restaurant ').replace(/\bmadhyahna\b|ಮಧ್ಯಾಹ್ನ/g,'lunch').replace(/\bratri\b/g,'dinner').replace(/\bbeligge\b/g,'breakfast').replace(/ರಾತ್ರಿ/g,'dinner').replace(/ಬೆಳಗ್ಗೆ|ಬೆಳಿಗ್ಗೆ/g,'breakfast')}
 function maybeListenForAnswer(){if(!pending||!followupReady||busy)return;followupReady=false;$('status').textContent='Trying to listen for your choice…';listen(true)}
-const baluVoiceURL='https://baluvoice.srinivasdeepares.workers.dev/voice';
+const baluVoiceURL='https://balu-voice.srinivasdeepurs.workers.dev/voice';
 let shubhEnabled=localStorage.getItem('balu_shubh_enabled')==='yes', challengeId=null, turnstileLoading=null;
 function voiceStatus(){ $('shubhToggle').textContent=shubhEnabled?'Use browser voice':'Enable Shubh male voice (beta)';$('shubhStatus').textContent=shubhEnabled?'Shubh is selected. Voice calls require a security check; Your browser speaks if the Worker is unavailable.':'Shubh is off. Enable to try the optional Kannada voice when the Worker is available.' }
 voiceStatus();
