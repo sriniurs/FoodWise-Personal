@@ -291,14 +291,23 @@ function recommendation(pick) {
       quips[Math.floor(Math.random() * quips.length)];
 }
 
+function restaurantQuery(request) {
+  const cleaned = request.trim()
+      .replace(/^hey\s+balu\b[\s,!:]*/i, '')
+      .replace(/^(?:where\s+(?:(?:can|could|should|do)\s+(?:i|we)\s+(?:(?:get|find|have)\s+)?|(?:to|can)\s+(?:get|find)\s+)?|(?:please\s+)?(?:find|show|recommend)\s+(?:me\s+)?)/i, '')
+      .replace(/^(?:(?:the|a|an|some)\s+)?(?:really\s+)?(?:best|good|great)\s+/i, '')
+      .replace(/\bdoas\b/gi, 'dosa')
+      .replace(/\b(?:near me|nearby|around here)\b/gi, '')
+      .replace(/[?!.]+$/, '').replace(/\s+/g, ' ').trim();
+  return !cleaned || /^(?:(?:shall\s+(?:we|i)\s+|(?:we|i)\s+)?eat|(?:a )?place to eat)$/i.test(cleaned)
+      ? 'restaurants' : cleaned;
+}
+
 async function search(request) {
   const current = ++searchSeq;
   stopSpeech();
   $('answerCard').hidden = true;
-  const cleaned = request.replace(/^(?:hey\s+balu[, ]*)?(?:(?:please\s+)?(?:find|show|recommend)\s+(?:me\s+)?)?/i, '')
-      .replace(/\b(?:near me|nearby|around here)\b/gi, '').replace(/\s+/g, ' ').trim();
-  const query = !cleaned || /^(?:where (?:should|shall|can) (?:we|i) eat|(?:a )?(?:good )?place to eat)[?.!]*$/i.test(cleaned)
-      ? 'restaurants' : cleaned;
+  const query = restaurantQuery(request);
   const namedArea = /\b(?:near|in|around)\s+(?!the mood\b|a\b|an\b)\p{L}/iu.test(query);
   const mapsAction = {label: 'Search Google Maps', url: mapsLink({displayName: query + (namedArea ? '' : ' near me')})};
   const key = localStorage.getItem(keyid);
