@@ -5,106 +5,181 @@
 </style></head>
 <body><main>
 <div class="top"><div><div class="brand">🍽 Balu <span style="color:#ffda74">· FoodWise</span></div><div class="sub">One question. One restaurant.</div></div><span class="pill">v1.7</span></div>
-<div class="card" style="margin-top:12px"><div class="choice" style="margin-top:0"><button type="button" class="small" id="shubhToggle">Enable Shubh male voice (beta)</button></div><div class="note" id="shubhStatus" style="margin-top:8px">Requires the Cloudflare voice Worker to be installed. Browser speech remains the fallback.</div><div id="turnstileVoice" aria-label="Voice verification" style="margin-top:8px"></div></div>
-<section class="hero"><h1>Where shall we eat?</h1><p>Ask about food in Kannada or English. You can also type a mix of both.</p><button class="mic" id="mic" aria-label="Tap to talk">🎙</button><div class="status" id="status" role="status">ಅಣ್ಣಾ, ಬಾಲು ರೆಡಿ! Tap to speak.</div><p class="sub" id="micLanguage"></p><button type="button" class="small" id="retryLanguage" hidden></button></section>
+<section class="hero"><h1>Where shall we eat?</h1><button class="mic" id="mic" aria-label="Tap to talk">🎙</button><div class="status" id="status" role="status">Tap to talk, or type below.</div><div id="turnstileVoice"></div></section>
 <form class="ask" id="ask"><input id="typed" placeholder="Or type: Find me a good restaurant" aria-label="Restaurant question"><button type="submit">Ask</button></form>
 <section id="answerCard" class="card" hidden><h2 id="heading">FOODWISE SAYS</h2><div id="answer" aria-live="polite"></div><div class="choice" id="choices"></div></section>
 <details><summary>⚙ Google Places connection · optional</summary><div class="settings"><p>Demo mode needs no key. For live results, enable Maps JavaScript API and Places API (New) in Google Cloud, enable billing and restrict a browser API key to this HTTPS website. Google usage charges may apply. Do not paste an unrestricted key.</p><label for="key">Restricted Google Maps browser API key</label><input type="password" id="key" autocomplete="off"><div class="choice"><button class="small" id="saveKey" type="button">Save on this phone</button><button class="small" id="clearKey" type="button">Remove</button></div><p id="mode"></p><p>FoodWise requests location only when making a live recommendation. Favourites and family/friends preference are saved on this phone, not uploaded to FoodWise.</p></div></details>
 <p class="note">Private-use prototype on a publicly accessible page. No ordering, booking or promotion verification. Not affiliated with Google.</p>
 </main><script>
-(()=>{'use strict';const $=id=>document.getElementById(id);const baluTurnstileSiteKey="0x4AAAAAAGDPXxUu0flmBtPq";const keyid='foodwise_browser_key',favid='foodwise_favourites';let pending=null,rec=null,busy=false,followupReady=false,diningContext=null;let favs=[];try{favs=JSON.parse(localStorage.getItem(favid)||'[]')}catch{}$('key').value=localStorage.getItem(keyid)||'';function mode(){$('mode').textContent=localStorage.getItem(keyid)?'Google connection configured — live lookup available once permissions and billing work.':'Interactive demo mode — no restaurant names are invented.'}mode();
+(()=>{'use strict';const $=id=>document.getElementById(id);const baluTurnstileSiteKey="0x4AAAAAAGDPXxUu0flmBtPq";const keyid='foodwise_browser_key',favid='foodwise_favourites';let pending=null,rec=null,busy=false,diningContext=null;let favs=[];try{favs=JSON.parse(localStorage.getItem(favid)||'[]')}catch{}$('key').value=localStorage.getItem(keyid)||'';function mode(){$('mode').textContent=localStorage.getItem(keyid)?'Google connection configured — live lookup available once permissions and billing work.':'Interactive demo mode — no restaurant names are invented.'}mode();
 
-// Migrate the previous voice preference as the initial browser recognition locale.
-const savedLanguage = localStorage.getItem('foodwise_microphone_language') ||
-    localStorage.getItem('foodwise_voice_lang');
-if (['kn-IN', 'en-IN'].includes(savedLanguage)) {
-  localStorage.setItem('foodwise_microphone_language', savedLanguage);
-}
-localStorage.removeItem('foodwise_geoapify_key');
-localStorage.removeItem('foodwise_geo_place_preferences');
-localStorage.removeItem('foodwise_voice_lang');
-const kannada = /[\u0C80-\u0CFF]/u;
-const romanizedKannada = /\b(oota|tindi|beka|beku|beda|namaskara|madhyahna|ratri|beligge)\b/i;
-let micLang = ['kn-IN', 'en-IN'].includes(savedLanguage) ? savedLanguage :
-    (navigator.language?.toLowerCase().startsWith('kn') ? 'kn-IN' : 'en-IN');
-let replyLang = micLang;
-let attemptedVoice = false;
-
-function isKn() { return replyLang === 'kn-IN'; }
-function otherMicLanguage() { return micLang === 'kn-IN' ? 'en-IN' : 'kn-IN'; }
-function languageName(lang) { return lang === 'kn-IN' ? 'Kannada' : 'English'; }
-
-function updateMicLanguage() {
-  $('micLanguage').textContent = 'Browser microphone uses ' + languageName(micLang) +
-      ' per attempt. Automatic speech detection is unavailable.';
-  $('retryLanguage').textContent = 'Try microphone in ' + languageName(otherMicLanguage());
-  $('retryLanguage').hidden = !attemptedVoice || busy;
-}
-updateMicLanguage();
+const voiceLanguage = 'en-IN';
 function knWords(q){return q.toLowerCase().replace(/ಉತ್ತರ ಕರ್ನಾಟಕ|ನಾರ್ತ್ ಇಂಡಿಯನ್|ಉತ್ತರ ಭಾರತೀಯ|ಉತ್ತರ ಭಾರತದ|ಉತ್ತರ ಇಂಡಿಯನ್/g,'north indian').replace(/ದಕ್ಷಿಣ ಭಾರತೀಯ|ದಕ್ಷಿಣ ಭಾರತದ|ದಕ್ಷಿಣ ಇಂಡಿಯನ್|ಸೌತ್ ಇಂಡಿಯನ್/g,'south indian').replace(/ಪ್ರೀಮಿಯಂ|ದುಬಾರಿ|ಫೈನ್ ಡೈನಿಂಗ್|ಐಷಾರಾಮಿ/g,'premium').replace(/ಸಾಮಾನ್ಯ|ರೆಗ್ಯುಲರ್|ಕಡಿಮೆ ಬೆಲೆ|ಬಜೆಟ್/g,'regular').replace(/ಹೋಟೆಲ್|ರೆಸ್ಟೋರೆಂಟ್|ಊಟ|ತಿಂಡಿ|ಭೋಜನ|ಒಳ್ಳೆ|ಒಳ್ಳೆಯ/g,' restaurant ').replace(/ಬಾರ್/g,' bar ').replace(/ಬೇಡ/g,' beda ').replace(/\b(bar\s+beda|beda\s+bar)\b/g,'regular restaurant').replace(/\b(oota|tindi)\b/g,' restaurant ').replace(/\bmadhyahna\b|ಮಧ್ಯಾಹ್ನ/g,'lunch').replace(/\bratri\b/g,'dinner').replace(/\bbeligge\b/g,'breakfast').replace(/ರಾತ್ರಿ/g,'dinner').replace(/ಬೆಳಗ್ಗೆ|ಬೆಳಿಗ್ಗೆ/g,'breakfast')}
-function maybeListenForAnswer(){if(!pending||!followupReady||busy)return;followupReady=false;$('status').textContent='Trying to listen for your choice…';listen(true)}
-const baluVoiceURL='https://balu-voice.srinivasdeepurs.workers.dev/voice';
-let shubhEnabled=localStorage.getItem('balu_shubh_enabled')==='yes', challengeId=null, turnstileLoading=null;
-function voiceStatus(){ $('shubhToggle').textContent=shubhEnabled?'Use browser voice':'Enable Shubh male voice (beta)';$('shubhStatus').textContent=shubhEnabled?'Shubh is selected. Voice calls require a security check; Your browser speaks if the Worker is unavailable.':'Shubh is off. Enable to try the optional Kannada voice when the Worker is available.' }
-voiceStatus();
-$('shubhToggle').onclick=()=>{shubhEnabled=!shubhEnabled;localStorage.setItem('balu_shubh_enabled',shubhEnabled?'yes':'no');voiceStatus();show(shubhEnabled?'ಅಣ್ಣಾ, ಶೂಭ್ ಧ್ವನಿ ಪರೀಕ್ಷೆಗೆ ಸಿದ್ಧ. ಒಮ್ಮೆ ಮಾತಾಡಿ ನೋಡಿ.':'Browser voice selected.')};
-function loadTurnstile(){if(window.turnstile)return Promise.resolve(window.turnstile);if(turnstileLoading)return turnstileLoading;turnstileLoading=new Promise((resolve,reject)=>{const tag=document.createElement('script');tag.src='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';tag.onload=()=>resolve(window.turnstile);tag.onerror=()=>{turnstileLoading=null;tag.remove();reject(Error('Turnstile could not load'))};document.head.append(tag)});return turnstileLoading}
-async function getTurnstileToken(){const ts=await loadTurnstile();return new Promise((resolve,reject)=>{let finished=false;const finish=(err,token)=>{if(finished)return;finished=true;clearTimeout(timer);if(err)reject(err);else resolve(token)};const timer=setTimeout(()=>finish(Error('Verification timed out')),25000);try{if(challengeId!==null){ts.remove(challengeId);challengeId=null}challengeId=ts.render('#turnstileVoice',{sitekey:baluTurnstileSiteKey,execution:'execute',appearance:'interaction-only',action:'balu_voice',callback:token=>finish(null,token),'error-callback':code=>{finish(Error('Verification error '+(code||'unknown')+'.'));return true},'expired-callback':()=>finish(Error('Verification expired'))});ts.execute(challengeId)}catch(e){finish(e)}})}
+const baluVoiceURL = 'https://balu-voice.srinivasdeepurs.workers.dev/voice';
+let turnstileLoading, cancelChallenge, voiceRequest, voicePlayer, audioURL, releasePlayer;
 let speechSeq = 0;
-let voicePlayer = null;
+
+function loadTurnstile() {
+  if (window.turnstile?.render) return Promise.resolve(window.turnstile);
+  if (!turnstileLoading) {
+    turnstileLoading = new Promise((resolve, reject) => {
+      const tag = document.createElement('script');
+      tag.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      const timer = setTimeout(fail, 4500);
+      function fail() {
+        clearTimeout(timer);
+        tag.remove();
+        reject(Error('Voice verification script unavailable'));
+      }
+      tag.onerror = fail;
+      tag.onload = () => {
+        clearTimeout(timer);
+        if (window.turnstile?.render) resolve(window.turnstile);
+        else fail();
+      };
+      document.head.append(tag);
+    }).catch(error => {
+      turnstileLoading = null;
+      throw error;
+    });
+  }
+  return turnstileLoading;
+}
+
+function getTurnstileToken(ts) {
+  return new Promise((resolve, reject) => {
+    let widget, finished = false;
+    const timer = setTimeout(() => finish(), 4500);
+    function finish(token) {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      cancelChallenge = null;
+      if (widget != null) ts.remove(widget);
+      if (token) resolve(token);
+      else reject(Error('Voice verification did not complete'));
+    }
+    cancelChallenge = () => finish();
+    try {
+      widget = ts.render('#turnstileVoice', {
+        sitekey: baluTurnstileSiteKey, action: 'balu_voice',
+        execution: 'execute', appearance: 'interaction-only',
+        callback: finish,
+        'error-callback': () => { finish(); return true; },
+        'expired-callback': () => finish(),
+        'timeout-callback': () => finish()
+      });
+      ts.execute(widget);
+    } catch {
+      finish();
+    }
+  });
+}
+
+function clearPlayer() {
+  voicePlayer?.pause();
+  voicePlayer = null;
+  if (audioURL) URL.revokeObjectURL(audioURL);
+  audioURL = null;
+}
 
 function stopSpeech() {
   speechSeq++;
-  followupReady = false;
-  if ('speechSynthesis' in window) speechSynthesis.cancel();
-  voicePlayer?.pause();
-  voicePlayer = null;
+  cancelChallenge?.();
+  voiceRequest?.abort();
+  releasePlayer?.();
+  clearPlayer();
+  window.speechSynthesis?.cancel();
 }
 
 function browserSay(text, current) {
-  const manual = () => {
-    if (pending && current === speechSeq) $('status').textContent = 'Tap the microphone to answer aloud.';
+  if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return;
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = voiceLanguage;
+  utterance.rate = .95;
+  const voices = speechSynthesis.getVoices();
+  const voice = voices.find(v => v.lang.toLowerCase() === 'en-in') ||
+      voices.find(v => v.lang.toLowerCase() === 'en-gb') ||
+      voices.find(v => /^en\b/i.test(v.lang));
+  if (voice) {
+    utterance.voice = voice;
+    utterance.lang = voice.lang;
+  }
+  utterance.onstart = () => {
+    if (current === speechSeq) $('answer').dataset.voice = 'browser';
   };
-  if (!('speechSynthesis' in window)) return manual();
+  utterance.onerror = () => {
+    if (current === speechSeq) $('answer').dataset.voice = 'unavailable';
+  };
+  speechSynthesis.speak(utterance);
+}
+
+function audioBlob(encoded) {
+  const binary = atob(encoded);
+  const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+  const wav = binary.startsWith('RIFF') && binary.slice(8, 12) === 'WAVE';
+  const mp3 = binary.startsWith('ID3') || (bytes[0] === 255 && (bytes[1] & 224) === 224);
+  if (!wav && !mp3) throw Error('Unsupported voice audio');
+  return new Blob([bytes], { type: wav ? 'audio/wav' : 'audio/mpeg' });
+}
+
+async function say(text) {
+  stopSpeech();
+  const current = speechSeq;
+  $('answer').dataset.voice = 'loading';
   try {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = kannada.test(text) ? 'kn-IN' : 'en-IN';
-    const voices = speechSynthesis.getVoices();
-    const match = voices.find(v => v.lang.toLowerCase() === utterance.lang.toLowerCase()) ||
-        voices.find(v => v.lang.toLowerCase().startsWith(utterance.lang.slice(0, 2)));
-    if (match) utterance.voice = match;
-    utterance.rate = utterance.lang === 'kn-IN' ? .9 : .95;
-    utterance.onend = () => {
-      if (pending && current === speechSeq) {
-        followupReady = true;
-        maybeListenForAnswer();
-      }
-    };
-    utterance.onerror = manual;
-    speechSynthesis.speak(utterance);
+    const ts = await loadTurnstile();
+    if (current !== speechSeq) return;
+    const token = await getTurnstileToken(ts);
+    if (current !== speechSeq) return;
+    const request = voiceRequest = new AbortController();
+    const timer = setTimeout(() => request.abort(), 6500);
+    let data;
+    try {
+      const response = await fetch(baluVoiceURL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: request.signal,
+        body: JSON.stringify({ text: text.slice(0, 450), token, language: voiceLanguage })
+      });
+      if (!response.ok) throw Error('Voice endpoint ' + response.status);
+      data = await response.json();
+    } finally {
+      clearTimeout(timer);
+      if (voiceRequest === request) voiceRequest = null;
+    }
+    if (current !== speechSeq) return;
+    audioURL = URL.createObjectURL(audioBlob(data.audio));
+    const player = voicePlayer = new Audio(audioURL);
+    await new Promise((resolve, reject) => {
+      releasePlayer = resolve;
+      player.onended = resolve;
+      player.onerror = () => reject(Error('Voice playback failed'));
+      player.play().then(() => {
+        if (current === speechSeq) $('answer').dataset.voice = 'shubh';
+      }, reject);
+    });
+    if (current === speechSeq) clearPlayer();
   } catch {
-    manual();
+    if (current !== speechSeq) return;
+    clearPlayer();
+    $('answer').dataset.voice = 'unavailable';
+    try { browserSay(text, current); } catch {}
+  } finally {
+    if (current === speechSeq) releasePlayer = null;
   }
 }
-function say(t){stopSpeech();const current=speechSeq;if(!shubhEnabled||!kannada.test(t)){browserSay(t,current);return}
-(async()=>{try{const token=await getTurnstileToken();if(current!==speechSeq)return;const res=await fetch(baluVoiceURL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:t.slice(0,450),token})});if(!res.ok)throw Error('Voice endpoint '+res.status);const data=await res.json();if(!data.audio)throw Error('Missing audio');if(current!==speechSeq)return;const player=voicePlayer=new Audio('data:audio/mpeg;base64,'+data.audio);player.onended=()=>{if(pending&&current===speechSeq){followupReady=true;maybeListenForAnswer()}};player.onerror=()=>{if(current===speechSeq)browserSay(t,current)};await player.play();if(current!==speechSeq)return;$('shubhStatus').textContent='Speaking with Sarvam Shubh · Kannada'}catch(e){if(current!==speechSeq)return;$('shubhStatus').textContent='Shubh unavailable ('+(e?.message||'connection error')+'). Using browser fallback.';browserSay(t,current)}})()}
 function show(t,options=[],actions=[],heading='BALU SAYS'){$('answerCard').hidden=false;$('heading').textContent=heading;$('answer').textContent=t;$('choices').replaceChildren();options.concat(actions).forEach(o=>{let b=document.createElement(o.url?'a':'button');b.textContent=o.label;b.className='small';if(o.url){b.href=o.url;b.target='_blank';b.rel='noopener noreferrer'}else b.onclick=o.fn;$('choices').append(b)});say(t)}
 function meal(q){q=q.toLowerCase();if(/breakfast|morning/.test(q))return'breakfast';if(/lunch|afternoon/.test(q))return'lunch';if(/dinner|tonight|evening/.test(q))return'dinner';let h=new Date().getHours();return h>=5&&h<11?'breakfast':h>=11&&h<17?'lunch':'dinner'}
 function handle(input) {
-  if (kannada.test(input) || romanizedKannada.test(input)) {
-    replyLang = 'kn-IN';
-  } else if (/\p{L}/u.test(input)) {
-    replyLang = 'en-IN';
-  }
   const q = knWords(input.trim());
   if (/\b(family|wife|kids|children)\b/.test(q))localStorage.setItem('foodwise_company','family');else if(/\b(friends|buddies|mates)\b/.test(q))localStorage.setItem('foodwise_company','friends');if(pending){let p=pending;pending=null;if(p==='lunch'){if(!/south|north/.test(q)){askLunch();return}return askDining({meal:'lunch',cuisine:/north/.test(q)?'North Indian':'South Indian'})}if(p==='dining'){if(!/regular|normal|casual|budget|affordable|premium|fine dining|fine dine|upscale|luxury|fancy/.test(q)){askDining(diningContext);return}const choice=/premium|fine dining|fine dine|upscale|luxury|fancy/.test(q)?'premium':'regular';return search({...diningContext,dining:choice})}if(p==='dinner'){if(!/bar|regular|family|no alcohol/.test(q)){askDinner();return}return askDining({meal:'dinner',bar:/regular|family|no alcohol/.test(q)?'regular':'bar'})}}if(/north indian|south indian/.test(q))return askDining({meal:'lunch',cuisine:/north/.test(q)?'North Indian':'South Indian'});if(/with (a )?bar|bar attached|rooftop bar/.test(q))return search({meal:'dinner',bar:'bar'});if(/regular restaurant|without (a )?bar/.test(q))return search({meal:'dinner',bar:'regular'});let m=meal(q);if(m==='breakfast')return askDining({meal:m});if(m==='lunch')return askLunch();askDinner()}
-const baluTease={lunch:['ಅಣ್ಣಾ, ಮತ್ತೆ ಹೋಟೆಲ್ ಹುಡುಕಾಟನಾ? ಮನೇಲಿ ಅಡುಗೆಗೆ ರಜಾ ಕೊಟ್ಟಿದ್ದೀರಾ ಏನು?','ಏನಣ್ಣಾ, ಹೊಟ್ಟೆ ಗಂಟೆ ಬಾರಿಸ್ತಿದೆಯಾ? ಬನ್ನಿ, ಒಳ್ಳೇ ಊಟ ನೋಡೋಣ.','ಅಣ್ಣಾ, ಊಟಕ್ಕೆ ಹೊರಟ್ರಾ? ಒಳ್ಳೇ ಕಡೆ ತೋರಿಸ್ತೀನಿ, ನನ್ನನ್ನೂ ಕರೆದುಕೊಂಡು ಹೋಗ್ತೀರಾ?'],dinner:['ಅಣ್ಣಾ, ಊಟ ಸಾಕಾಗಿಲ್ವಾ? ಇನ್ನೇನಾದ್ರೂ ಬೇಕಾ? ಏನೇನು ಬೇಕು ಹೇಳಣ್ಣಾ!','ಏನಣ್ಣಾ, ಸಂಜೆ ಆಗ್ತಿದ್ದಂತೆ ಹೋಟೆಲ್ ನೆನಪಾಯ್ತಾ? ಊಟನಾ, ಪಾರ್ಟಿನಾ?','ಅಣ್ಣಾ, ಇವತ್ತು ಏನೋ ಪ್ಲಾನ್ ಇದೆ ಅನ್ಸುತ್ತೆ! ಊಟಕ್ಕೆ ಒಳ್ಳೇ ಜಾಗ ಹುಡುಕೋಣವಾ?'],dining:['ಅಣ್ಣಾ, ಜೇಬು ಗಟ್ಟಿ ಇದೆಯಾ? ರೆಗ್ಯುಲರ್ ಬೇಕಾ, ಪ್ರೀಮಿಯಂ ಬೇಕಾ?','ಅಣ್ಣಾ, ರಾಜರ ಥರ ಊಟನಾ, ನಮ್ಮ ಥರ ಆರಾಮಾಗಿ ಊಟನಾ? ರೆಗ್ಯುಲರ್ ಅಥವಾ ಪ್ರೀಮಿಯಂ?','ಏನಣ್ಣಾ, ಇವತ್ತು ಖರ್ಚು ಮಾಡೋ ಮೂಡಾ? ಸಾಮಾನ್ಯನಾ, ಪ್ರೀಮಿಯಮ್ಮಾ?'],result:['ಅಣ್ಣಾ, ರೇಟಿಂಗ್‌ಗಳನ್ನೆಲ್ಲ ತೂಕ ಹಾಕಿ ನೋಡಿದ್ದೀನಿ. ಹೊಟ್ಟೆ ಖುಷಿಯಾಗಲಿ!','ಅಣ್ಣಾ, ಈ ಸಲ ಹತ್ತಿರ ಇದೆ ಅಂತ ಸಿಕ್ಕಿದ್ದನ್ನೇ ಹೇಳ್ತಿಲ್ಲ; ರಿವ್ಯೂ ನೋಡಿದ್ದೀನಿ!','ಅಣ್ಣಾ, ನಾನು ಹುಡುಕಿದ್ದು ಹೋಟೆಲ್; ಬಿಲ್ ಕಟ್ಟೋದು ಮಾತ್ರ ನೀವೇ!']};let baluJokeIndex=0;function baluJoke(kind){const arr=baluTease[kind]||[];return arr[(baluJokeIndex++)%arr.length]||''}
-function askLunch(){pending='lunch';if(isKn())return show(baluJoke('lunch')+' ಸೌತ್ ಇಂಡಿಯನ್ ಬೇಕಾ, ನಾರ್ತ್ ಇಂಡಿಯನ್ ಬೇಕಾ?', [{label:'South Indian',fn:()=>{pending=null;askDining({meal:'lunch',cuisine:'South Indian'})}},{label:'North Indian',fn:()=>{pending=null;askDining({meal:'lunch',cuisine:'North Indian'})}}]);show((localStorage.getItem('foodwise_company')==='family'?'Family lunch it is — let’s find somewhere everyone can agree on! ':localStorage.getItem('foodwise_company')==='friends'?'Lunch with the gang? Let’s make it a good one! ':'')+'For lunch, would you prefer South Indian or North Indian?', [{label:'South Indian',fn:()=>{pending=null;askDining({meal:'lunch',cuisine:'South Indian'})}},{label:'North Indian',fn:()=>{pending=null;askDining({meal:'lunch',cuisine:'North Indian'})}}])}
-function askDining(context){diningContext=context;pending='dining';show(isKn()?baluJoke('dining'):'One more thing: regular dining or premium dining? I can dress up the recommendation, not your bill.',[{label:'Regular dining',fn:()=>{pending=null;search({...diningContext,dining:'regular'})}},{label:'Premium dining',fn:()=>{pending=null;search({...diningContext,dining:'premium'})}}])}
-function askDinner(){pending='dinner';if(isKn())return show(baluJoke('dinner')+' ಬಾರ್ ಇರೋ ಜಾಗ ಬೇಕಾ, ಬರೀ ಊಟದ ಹೋಟೆಲ್ ಬೇಕಾ?', [{label:'With a bar',fn:()=>{pending=null;askDining({meal:'dinner',bar:'bar'})}},{label:'Regular restaurant',fn:()=>{pending=null;askDining({meal:'dinner',bar:'regular'})}}]);show((localStorage.getItem('foodwise_company')==='family'?'Family night out! I’ll look for good food and a comfortable place. ':localStorage.getItem('foodwise_company')==='friends'?'Out with friends again? I promise not to tell anyone who ordered extra starters! ':'')+'For dinner, would you prefer a restaurant with a bar or a regular restaurant?', [{label:'With a bar',fn:()=>{pending=null;askDining({meal:'dinner',bar:'bar'})}},{label:'Regular restaurant',fn:()=>{pending=null;askDining({meal:'dinner',bar:'regular'})}}])}
-function listen(automatic = false) {
+function askLunch(){pending='lunch';show((localStorage.getItem('foodwise_company')==='family'?'Family lunch it is — let’s find somewhere everyone can agree on! ':localStorage.getItem('foodwise_company')==='friends'?'Lunch with the gang? Let’s make it a good one! ':'')+'South Indian or North Indian for lunch?', [{label:'South Indian',fn:()=>{pending=null;askDining({meal:'lunch',cuisine:'South Indian'})}},{label:'North Indian',fn:()=>{pending=null;askDining({meal:'lunch',cuisine:'North Indian'})}}])}
+function askDining(context){diningContext=context;pending='dining';show('Regular or premium today?',[{label:'Regular dining',fn:()=>{pending=null;search({...diningContext,dining:'regular'})}},{label:'Premium dining',fn:()=>{pending=null;search({...diningContext,dining:'premium'})}}])}
+function askDinner(){pending='dinner';show((localStorage.getItem('foodwise_company')==='family'?'Family night out! I’ll look for good food and a comfortable place. ':localStorage.getItem('foodwise_company')==='friends'?'Out with friends again? I promise not to tell anyone who ordered extra starters! ':'')+'Somewhere with a bar, or a regular restaurant?', [{label:'With a bar',fn:()=>{pending=null;askDining({meal:'dinner',bar:'bar'})}},{label:'Regular restaurant',fn:()=>{pending=null;askDining({meal:'dinner',bar:'regular'})}}])}
+function listen() {
   if (busy) {
-    if (!automatic) rec?.stop();
+    rec?.stop();
     return;
   }
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -115,20 +190,17 @@ function listen(automatic = false) {
   }
 
   stopSpeech();
-  const language = micLang;
   let transcript = '';
   let failed = false;
   try {
     const recognizer = new Recognition();
     rec = recognizer;
     busy = true;
-    attemptedVoice = true;
-    updateMicLanguage();
-    recognizer.lang = language;
+    recognizer.lang = voiceLanguage;
     recognizer.interimResults = false;
     recognizer.onstart = () => {
       $('mic').classList.add('active');
-      status.textContent = 'Listening in ' + languageName(language) + '… Tap to finish.';
+      status.textContent = 'Listening… Tap to finish.';
     };
     recognizer.onresult = event => {
       transcript = event.results[event.resultIndex][0].transcript.trim();
@@ -143,7 +215,6 @@ function listen(automatic = false) {
       rec = null;
       busy = false;
       $('mic').classList.remove('active');
-      updateMicLanguage();
       if (failed) return;
       if (!transcript) {
         status.textContent = 'No speech captured. Retry the microphone or type below.';
@@ -156,18 +227,10 @@ function listen(automatic = false) {
   } catch {
     rec = null;
     busy = false;
-    updateMicLanguage();
     status.textContent = 'Microphone could not start. Tap again or type below.';
   }
 }
 
-$('retryLanguage').onclick = () => {
-  if (busy) return;
-  micLang = otherMicLanguage();
-  localStorage.setItem('foodwise_microphone_language', micLang);
-  updateMicLanguage();
-  listen();
-};
 $('mic').onclick=()=>listen();$('ask').onsubmit=e=>{e.preventDefault();let q=$('typed').value.trim();if(q && !busy){$('typed').value='';$('status').textContent='';handle(q)}};$('saveKey').onclick=()=>{let k=$('key').value.trim();if(k)localStorage.setItem(keyid,k);else localStorage.removeItem(keyid);mode();show('Google API key preference saved on this device. Live searches require a correctly restricted key, API access and billing.')};$('clearKey').onclick=()=>{localStorage.removeItem(keyid);$('key').value='';mode();show('Google connection cleared. Demo mode is active.')};
 function pos(){return new Promise((yes,no)=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>yes({lat:p.coords.latitude,lng:p.coords.longitude}),no,{timeout:12000,enableHighAccuracy:false}):no(Error('Geolocation unavailable')))}
 function googleScript(k){if(window.google?.maps?.importLibrary)return Promise.resolve();if(window.googlePromise)return window.googlePromise;window.googlePromise=new Promise((yes,no)=>{let s=document.createElement('script');s.src='https://maps.googleapis.com/maps/api/js?key='+encodeURIComponent(k)+'&v=weekly&libraries=places';s.onload=yes;s.onerror=()=>no(Error('Google Maps script could not load'));document.head.append(s)});return window.googlePromise}
@@ -175,11 +238,11 @@ function dist(a,b){return 6371*2*Math.asin(Math.sqrt(Math.sin((a.lat-b.lat)*Math
 const googleAvoidId='foodwise_google_avoid';function googleAvoid(){try{return JSON.parse(localStorage.getItem(googleAvoidId)||'[]')}catch{return []}}
 function mapsLink(p){return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(p.displayName||'restaurant')+(p.id?'&query_place_id='+encodeURIComponent(p.id):'')}
 function funnyLine(o){const jokes=o.meal==='lunch'?['My stomach has voted. Fortunately, I checked the reviews before counting the ballots.','Lunch intelligence is in. No undercover samosas were harmed during this search.','I looked beyond the nearest signboard. Your appetite deserves due diligence.']:['I did the homework, so your stomach does not have to.','Good food first, dramatic dinner decisions later.','I compared the contenders. The menu is still in charge.'];return jokes[Math.floor(Math.random()*jokes.length)]}
-async function search(o){pending=null;const kind=o.meal==='breakfast'?'breakfast':o.meal==='lunch'?o.cuisine+' lunch':o.bar==='bar'?'dinner at a restaurant with a bar':'dinner at a regular restaurant';const key=localStorage.getItem(keyid);if(!key){$('status').textContent='Demo mode';return show(isKn()?'ಅಣ್ಣಾ, ಹತ್ತಿರದ ರೆಸ್ಟೋರೆಂಟ್‌ಗಳನ್ನು Google Maps ನಲ್ಲಿ ಹುಡುಕಿ. ರೇಟಿಂಗ್ ಸಹಿತ ಶಿಫಾರಸಿಗೆ Google Places ಸಂಪರ್ಕಿಸಿ.':'Demo mode: '+kind+' selected. Connect a supported Google Places key for rated suggestions.', [{label:'Search Google Maps',url:'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(kind+' near me')}],[],'DEMO RECOMMENDATION')}
+async function search(o){pending=null;const kind=o.meal==='breakfast'?'breakfast':o.meal==='lunch'?o.cuisine+' lunch':o.bar==='bar'?'dinner at a restaurant with a bar':'dinner at a regular restaurant';const key=localStorage.getItem(keyid);if(!key){$('status').textContent='Demo mode';return show('Demo mode: '+kind+' selected. Connect a supported Google Places key for rated suggestions.', [{label:'Search Google Maps',url:'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(kind+' near me')}],[],'DEMO RECOMMENDATION')}
 $('status').textContent='Comparing nearby restaurants…';try{const loc=await pos();await googleScript(key);const lib=await google.maps.importLibrary('places');const query=o.meal==='breakfast'?'breakfast restaurants':o.meal==='lunch'?o.cuisine+' restaurants':o.bar==='bar'?'restaurants with bar':'family restaurants';const response=await lib.Place.searchByText({textQuery:query,fields:['id','displayName','location','rating','userRatingCount','priceLevel','formattedAddress'],locationBias:{center:loc,radius:8000},isOpenNow:true,maxResultCount:20,language:'en',region:'in'});const avoid=googleAvoid(),candidates=(response.places||[]).filter(p=>p.location&&typeof p.rating==='number'&&!avoid.includes(p.id)).map(p=>({p,d:dist(loc,{lat:p.location.lat(),lng:p.location.lng()})}));if(!candidates.length)throw Error('No rated restaurants found among the current Google results');
 const tier=p=>String(p.priceLevel||'').toUpperCase();const preferred=x=>{const level=tier(x.p);return o.dining==='premium'?(/EXPENSIVE/.test(level)&&!/INEXPENSIVE/.test(level)):o.dining==='regular'?(/INEXPENSIVE|MODERATE/.test(level)):true};const tierMatches=o.dining?candidates.filter(preferred):candidates;const rankingPool=tierMatches.length?tierMatches:candidates;
 const weighted=x=>{const n=Math.max(0,x.p.userRatingCount||0),r=x.p.rating;const confidence=(n*r+100*3.8)/(n+100);return confidence*18+Math.min(Math.log1p(n),10)*1.7-Math.min(x.d,20)*1.3+(favs.includes(x.p.id)?6:0)};
-rankingPool.sort((a,b)=>weighted(b)-weighted(a));const top=rankingPool.slice(0,3),winner=top[0];const fmt=x=>x.p.displayName+', '+x.p.rating+' stars from '+(x.p.userRatingCount||0)+' reviews, '+x.d.toFixed(1)+' kilometres away';const comparison=top.length>1?' I compared '+top.length+' options. Runner-up: '+fmt(top[1])+'.':' Only one rated option was returned.';const cuisineCaveat=o.cuisine?' Google search matched your '+o.cuisine+' request, but please confirm the menu before leaving.':'';const barCaveat=o.bar==='bar'?' Please confirm bar availability.':'';const tierNote=o.dining?(tierMatches.length?' The listed price category fits your '+o.dining+' dining preference.':' Google did not return a matching listed price category, so this is a fallback; please check the menu and prices.') : '';const msg=isKn()?(baluJoke('result')+' ನನ್ನ ಆಯ್ಕೆ '+winner.p.displayName+'. ಗೂಗಲ್ ರೇಟಿಂಗ್ '+winner.p.rating+' ಸ್ಟಾರ್ಸ್, '+(winner.p.userRatingCount||0)+' ರಿವ್ಯೂಗಳು. ದೂರ ಸುಮಾರು '+winner.d.toFixed(1)+' ಕಿಲೋಮೀಟರ್. '+(top.length>1?'ಇನ್ನೊಂದು ಆಯ್ಕೆ '+top[1].p.displayName+'. ':'')+'ರೇಟಿಂಗ್, ರಿವ್ಯೂಗಳ ಸಂಖ್ಯೆ ಮತ್ತು ದೂರ ಹೋಲಿಸಿ ಆಯ್ಕೆ ಮಾಡಿದ್ದೇನೆ. '+(o.dining==='premium'?'ಪ್ರೀಮಿಯಂ ಡೈನಿಂಗ್ ಕೇಳಿದ್ದೀರಿ. ':o.dining==='regular'?'ಸಾಮಾನ್ಯ ಡೈನಿಂಗ್ ಕೇಳಿದ್ದೀರಿ. ':'')+'ಹೊರಡುವ ಮುನ್ನ ಮೆನು, ದರ ಮತ್ತು ಸಮಯ ಪರಿಶೀಲಿಸಿ. ಹೊಟ್ಟೆ ಖುಷಿ ಆಗಲಿ, ಪರ್ಸ್‌ಗೆ ಕಷ್ಟ ಬೇಡ!'):(funnyLine(o)+' Anna, my pick is '+fmt(winner)+'.'+tierNote+' I favoured the rating backed by review volume, with distance as a secondary factor.'+comparison+cuisineCaveat+barCaveat+' Check hours before travelling.');
+rankingPool.sort((a,b)=>weighted(b)-weighted(a));const top=rankingPool.slice(0,3),winner=top[0];const fmt=x=>x.p.displayName+', '+x.p.rating+' stars from '+(x.p.userRatingCount||0)+' reviews, '+x.d.toFixed(1)+' kilometres away';const msg=funnyLine(o)+' My pick is '+fmt(winner)+'.';
 const actions=[];top.forEach((x,i)=>{const p=x.p;actions.push({label:(i===0?'Winner':'Option '+(i+1))+': '+p.displayName+' · Maps',url:mapsLink(p)});actions.push({label:'Favourite '+(i+1),fn:()=>{if(!favs.includes(p.id))favs.push(p.id);localStorage.setItem(favid,JSON.stringify(favs));show(p.displayName+' is saved as a favourite. Good taste deserves a memory.')}});actions.push({label:'Avoid '+(i+1),fn:()=>{const ids=googleAvoid();if(!ids.includes(p.id))ids.push(p.id);localStorage.setItem(googleAvoidId,JSON.stringify(ids));show('Noted. I will avoid '+p.displayName+' in future suggestions on this phone.')}})});
 show(msg,actions,[],'GOOGLE · TOP THREE COMPARISON');$('status').textContent='Google comparison · '+top.length+' option(s)';}catch(e){$('status').textContent='Google search unavailable';show('I could not retrieve rated Google restaurants: '+(e.message||'unknown error')+'. Check key permissions, your demo allowance and location access.',[{label:'Open Google Maps',url:'https://www.google.com/maps/search/restaurants+near+me'}])}}
 
